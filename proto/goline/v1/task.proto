@@ -1,0 +1,333 @@
+syntax = "proto3";
+
+package goline.v1;
+
+option go_package = "github.com/kazz187/goline/proto/gen/go/goline/v1";
+
+// Task contains the essential metadata about a task
+// This is stored in the main [taskID].pb file
+message Task {
+  // Unique identifier for the task
+  string id = 1;
+  
+  // Current state of the task
+  TaskState state = 2;
+  
+  // Terminal ID associated with this task
+  string terminal_id = 3;
+  
+  // Provider used for this task (e.g., "anthropic", "deepseek")
+  string provider = 4;
+  
+  // Model/engine used for this task
+  string model = 5;
+  
+  // Initial prompt that started the task
+  string initial_prompt = 6;
+  
+  // Timestamp when the task was created (in RFC 3339 format)
+  string created_at = 7;
+  
+  // Timestamp when the task was last updated (in RFC 3339 format)
+  string updated_at = 8;
+  
+  // Directory where the task was executed
+  string working_directory = 9;
+  
+  // List of checkpoint IDs associated with this task
+  repeated string checkpoint_ids = 10;
+  
+  // Sequence number for the next event file
+  uint32 next_event_sequence = 11;
+}
+
+// TaskState represents the current state of a task
+enum TaskState {
+  // Default unspecified state
+  TASK_STATE_UNSPECIFIED = 0;
+  
+  // Task is currently active and in progress
+  TASK_STATE_ACTIVE = 1;
+  
+  // Task is paused and can be resumed
+  TASK_STATE_PAUSED = 2;
+  
+  // Task has been completed
+  TASK_STATE_COMPLETED = 3;
+  
+  // Task has been cancelled
+  TASK_STATE_CANCELLED = 4;
+  
+  // Task encountered an error
+  TASK_STATE_ERROR = 5;
+}
+
+// TaskEvent represents a single event in the task's history
+// These are stored in append-only log files like [taskID]/00001.pb
+message TaskEvent {
+  // Unique identifier for this event
+  string id = 1;
+  
+  // Timestamp when this event occurred (in RFC 3339 format)
+  string timestamp = 2;
+  
+  // Type of event
+  oneof event {
+    UserMessage user_message = 3;
+    AIResponse ai_response = 4;
+    ToolCallEvent tool_call = 5;
+    FileModificationEvent file_modification = 6;
+    CheckpointEvent checkpoint = 7;
+    SystemEvent system_event = 8;
+  }
+}
+
+// UserMessage represents a message from the user
+message UserMessage {
+  // Content of the user's message
+  string content = 1;
+  
+  // Type of user message
+  UserMessageType type = 2;
+}
+
+// UserMessageType defines the type of user message
+enum UserMessageType {
+  // Default unspecified type
+  USER_MESSAGE_TYPE_UNSPECIFIED = 0;
+  
+  // User asked a question
+  USER_MESSAGE_TYPE_ASK = 1;
+  
+  // User applied a suggestion
+  USER_MESSAGE_TYPE_APPLY = 2;
+  
+  // User cancelled a suggestion
+  USER_MESSAGE_TYPE_CANCEL = 3;
+  
+  // User saved a checkpoint
+  USER_MESSAGE_TYPE_CHECKPOINT_SAVE = 4;
+  
+  // User restored a checkpoint
+  USER_MESSAGE_TYPE_CHECKPOINT_RESTORE = 5;
+  
+  // User requested a diff
+  USER_MESSAGE_TYPE_DIFF = 6;
+}
+
+// AIResponse represents a response from the AI
+message AIResponse {
+  // Content of the AI's response
+  string content = 1;
+  
+  // Whether this response contains a suggestion that can be applied
+  bool has_suggestion = 2;
+  
+  // Suggestion ID if this response contains a suggestion
+  string suggestion_id = 3;
+}
+
+// ToolCallEvent represents a call to a tool by the AI
+message ToolCallEvent {
+  // Name of the tool that was called
+  string tool_name = 1;
+  
+  // Arguments passed to the tool
+  string arguments = 2;
+  
+  // Result returned by the tool
+  string result = 3;
+  
+  // Whether the tool call was successful
+  bool success = 4;
+  
+  // Error message if the tool call failed
+  string error_message = 5;
+}
+
+// FileModificationEvent represents a change to a file
+message FileModificationEvent {
+  // Path to the file that was modified
+  string file_path = 1;
+  
+  // Type of modification
+  ModificationType type = 2;
+  
+  // Diff of the changes (if applicable)
+  string diff = 3;
+  
+  // Hash of the file content after modification
+  string content_hash = 4;
+}
+
+// ModificationType defines how a file was modified
+enum ModificationType {
+  // Default unspecified type
+  MODIFICATION_TYPE_UNSPECIFIED = 0;
+  
+  // File was created
+  MODIFICATION_TYPE_CREATE = 1;
+  
+  // File was updated
+  MODIFICATION_TYPE_UPDATE = 2;
+  
+  // File was deleted
+  MODIFICATION_TYPE_DELETE = 3;
+  
+  // File was renamed
+  MODIFICATION_TYPE_RENAME = 4;
+}
+
+// CheckpointEvent represents a checkpoint operation
+message CheckpointEvent {
+  // Type of checkpoint operation
+  CheckpointOperationType operation_type = 1;
+  
+  // Checkpoint ID
+  string checkpoint_id = 2;
+  
+  // Human-readable name for this checkpoint
+  string name = 3;
+  
+  // Description of this checkpoint
+  string description = 4;
+}
+
+// CheckpointOperationType defines the type of checkpoint operation
+enum CheckpointOperationType {
+  // Default unspecified type
+  CHECKPOINT_OPERATION_TYPE_UNSPECIFIED = 0;
+  
+  // Checkpoint was saved
+  CHECKPOINT_OPERATION_TYPE_SAVE = 1;
+  
+  // Checkpoint was restored
+  CHECKPOINT_OPERATION_TYPE_RESTORE = 2;
+}
+
+// SystemEvent represents a system message or notification
+message SystemEvent {
+  // Content of the system message
+  string content = 1;
+  
+  // Type of system event
+  SystemEventType type = 2;
+}
+
+// SystemEventType defines the type of system event
+enum SystemEventType {
+  // Default unspecified type
+  SYSTEM_EVENT_TYPE_UNSPECIFIED = 0;
+  
+  // Task was started
+  SYSTEM_EVENT_TYPE_TASK_STARTED = 1;
+  
+  // Task was paused
+  SYSTEM_EVENT_TYPE_TASK_PAUSED = 2;
+  
+  // Task was resumed
+  SYSTEM_EVENT_TYPE_TASK_RESUMED = 3;
+  
+  // Task was completed
+  SYSTEM_EVENT_TYPE_TASK_COMPLETED = 4;
+  
+  // Task encountered an error
+  SYSTEM_EVENT_TYPE_TASK_ERROR = 5;
+  
+  // General information message
+  SYSTEM_EVENT_TYPE_INFO = 6;
+  
+  // Warning message
+  SYSTEM_EVENT_TYPE_WARNING = 7;
+  
+  // Error message
+  SYSTEM_EVENT_TYPE_ERROR = 8;
+}
+
+// Checkpoint represents a saved state of the task
+message Checkpoint {
+  // Unique identifier for this checkpoint
+  string id = 1;
+  
+  // Human-readable name for this checkpoint
+  string name = 2;
+  
+  // Description of this checkpoint
+  string description = 3;
+  
+  // Timestamp when this checkpoint was created (in RFC 3339 format)
+  string timestamp = 4;
+  
+  // List of file snapshots in this checkpoint
+  repeated FileSnapshot files = 5;
+  
+  // Git status at this point (if applicable)
+  GitStatus git_status = 6;
+}
+
+// FileSnapshot represents the state of a file at a point in time
+message FileSnapshot {
+  // Path to the file
+  string file_path = 1;
+  
+  // Content of the file
+  string content = 2;
+  
+  // Hash of the file content (for quick comparison)
+  string content_hash = 3;
+}
+
+// GitStatus represents the git status of the workspace
+message GitStatus {
+  // Current branch
+  string branch = 1;
+  
+  // Current commit hash
+  string commit_hash = 2;
+  
+  // Whether there are uncommitted changes
+  bool has_uncommitted_changes = 3;
+  
+  // List of modified files
+  repeated string modified_files = 4;
+}
+
+// TaskList represents a collection of tasks
+message TaskList {
+  // List of task summaries
+  repeated TaskSummary tasks = 1;
+}
+
+// TaskSummary contains a summary of a task (for listing purposes)
+message TaskSummary {
+  // Unique identifier for the task
+  string id = 1;
+  
+  // Current state of the task
+  TaskState state = 2;
+  
+  // Initial prompt that started the task (truncated)
+  string initial_prompt_preview = 3;
+  
+  // Timestamp when the task was created (in RFC 3339 format)
+  string created_at = 4;
+  
+  // Timestamp when the task was last updated (in RFC 3339 format)
+  string updated_at = 5;
+  
+  // Terminal ID associated with this task
+  string terminal_id = 6;
+}
+
+// TaskEventBatch represents a batch of events stored in a single file
+// This is the root message for [taskID]/NNNNN.pb files
+message TaskEventBatch {
+  // Task ID this batch belongs to
+  string task_id = 1;
+  
+  // Sequence number of this batch
+  uint32 sequence = 2;
+  
+  // Events in this batch
+  repeated TaskEvent events = 3;
+}
