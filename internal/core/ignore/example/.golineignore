@@ -1,0 +1,3 @@
+# Updated ignore patterns
+*.md
+private/
