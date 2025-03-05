@@ -1,4 +1,4 @@
-package message
+package assistantmessage
 
 // ContentType represents the type of content in an assistant message
 type ContentType string
