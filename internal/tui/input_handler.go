@@ -79,10 +79,54 @@ func (h *InputHandler) HandleKeyEvent(e ui.Event) bool {
 	case "<Tab>":
 		// Tab for auto-completion (not implemented yet)
 		h.handleTab()
+	case "<Space>":
+		// Space character
+		h.handleCharInput(" ")
+	case "<C-d>":
+		// Ctrl+D (EOF)
+		if h.commandActive {
+			// If we're in a multi-line input mode, submit the current input
+			h.commandActive = false
+			h.integration.AddSystemMessage("Multi-line input completed")
+
+			// Get the command from the prompt
+			cmdName := strings.TrimSuffix(h.ui.replParagraph.Title, "> ")
+
+			// Process the multi-line input based on the command
+			if cmdName == "ask" {
+				if h.currentInput == "" {
+					h.integration.AddSystemMessage("Error: question is required")
+				} else {
+					h.integration.AddSystemMessage("Sending question to AI agent...")
+					h.integration.AddSystemMessage("TODO: Implement ask logic")
+					h.integration.AddUserInput(fmt.Sprintf("ask\n%s", h.currentInput))
+				}
+			}
+
+			// Clear the input
+			h.currentInput = ""
+			h.cursorPos = 0
+			h.ui.UpdateREPLInput(h.currentInput)
+
+			// Reset the prompt
+			h.ui.UpdateREPLPrompt("Command Input")
+
+			return false
+		} else if h.currentInput == "" {
+			// If input is empty, treat as exit command (common behavior in REPLs)
+			h.integration.AddSystemMessage("EOF received, exiting...")
+			return true
+		} else {
+			// Otherwise, just log it
+			slog.Info("Ctrl+D (EOF) received")
+		}
 	default:
 		// Regular character input
 		if len(e.ID) == 1 {
 			h.handleCharInput(e.ID)
+		} else if e.ID == " " {
+			// Alternative space representation
+			h.handleCharInput(" ")
 		}
 	}
 
@@ -95,6 +139,12 @@ func (h *InputHandler) HandleKeyEvent(e ui.Event) bool {
 // handleEnter handles the Enter key
 func (h *InputHandler) handleEnter() bool {
 	if h.currentInput == "" {
+		return false
+	}
+
+	// If we're in multi-line input mode, add a newline instead of submitting
+	if h.commandActive {
+		h.handleCharInput("\n")
 		return false
 	}
 
@@ -118,6 +168,11 @@ func (h *InputHandler) handleEnter() bool {
 	h.currentInput = ""
 	h.cursorPos = 0
 	h.ui.UpdateREPLInput(h.currentInput)
+
+	// Reset the prompt if it was changed
+	if h.ui.replParagraph.Title != "Command Input" {
+		h.ui.UpdateREPLPrompt("Command Input")
+	}
 
 	return false
 }
@@ -148,7 +203,8 @@ func (h *InputHandler) processCommand(command string) {
 	case "ask":
 		question := strings.TrimSpace(strings.TrimPrefix(command, "ask"))
 		if question == "" {
-			h.integration.AddSystemMessage("Error: question is required")
+			// Start multi-line input mode
+			h.startMultiLineInput("ask")
 			return
 		}
 		h.integration.AddSystemMessage("Sending question to AI agent...")
@@ -290,4 +346,13 @@ func (h *InputHandler) handleTab() {
 func (h *InputHandler) handleCharInput(char string) {
 	h.currentInput = h.currentInput[:h.cursorPos] + char + h.currentInput[h.cursorPos:]
 	h.cursorPos++
+}
+
+// startMultiLineInput starts multi-line input mode for a command
+func (h *InputHandler) startMultiLineInput(command string) {
+	h.commandActive = true
+	h.integration.AddSystemMessage(fmt.Sprintf("Enter multi-line input for '%s' command (press Ctrl+D when done):", command))
+
+	// Update the prompt to indicate multi-line input mode
+	h.ui.UpdateREPLPrompt(fmt.Sprintf("%s> ", command))
 }

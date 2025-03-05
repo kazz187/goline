@@ -46,10 +46,12 @@ func NewUI(shell *ishell.Shell) (*UI, error) {
 		return nil, fmt.Errorf("failed to initialize termui: %w", err)
 	}
 
-	// Create task info widget
+	// Create task info widget (optimized for single line display)
 	taskInfo := widgets.NewParagraph()
 	taskInfo.Title = "Task Information"
 	taskInfo.BorderStyle.Fg = ui.ColorYellow
+	taskInfo.PaddingTop = 0
+	taskInfo.PaddingBottom = 0
 
 	// Create history widget
 	historyList := widgets.NewList()
@@ -58,6 +60,13 @@ func NewUI(shell *ishell.Shell) (*UI, error) {
 	historyList.TextStyle = ui.NewStyle(ui.ColorWhite)
 	historyList.WrapText = true
 
+	// Ensure we have a reasonable minimum width for the history list
+	// This helps prevent vertical text rendering before the UI is fully initialized
+	termWidth, termHeight := ui.TerminalDimensions()
+	if termWidth < 20 {
+		termWidth = 80 // Default to 80 columns if terminal width is too small
+	}
+
 	// Create REPL widget
 	replParagraph := widgets.NewParagraph()
 	replParagraph.Title = "Command Input"
@@ -65,18 +74,19 @@ func NewUI(shell *ishell.Shell) (*UI, error) {
 
 	// Create grid layout
 	grid := ui.NewGrid()
-	termWidth, termHeight := ui.TerminalDimensions()
+	// Use the already declared variables
+	termWidth, termHeight = ui.TerminalDimensions()
 	grid.SetRect(0, 0, termWidth, termHeight)
 
 	// Set up the grid with three rows
-	// Task info: 15% of height
-	// History: 70% of height
+	// Task info: just enough for a single line (3 fixed height units)
+	// History: takes up most of the remaining space
 	// REPL: 15% of height
 	grid.Set(
-		ui.NewRow(0.15,
+		ui.NewRow(3.0/float64(termHeight),
 			ui.NewCol(1.0, taskInfo),
 		),
-		ui.NewRow(0.70,
+		ui.NewRow(0.85-(3.0/float64(termHeight)),
 			ui.NewCol(1.0, historyList),
 		),
 		ui.NewRow(0.15,
@@ -120,6 +130,12 @@ func (u *UI) UpdateREPLInput(input string) {
 	u.renderREPL()
 }
 
+// UpdateREPLPrompt updates the REPL prompt
+func (u *UI) UpdateREPLPrompt(prompt string) {
+	u.replParagraph.Title = prompt
+	u.renderREPL()
+}
+
 // renderTaskInfo renders the task info widget
 func (u *UI) renderTaskInfo() {
 	elapsed := time.Since(u.taskInfoData.StartTime).Round(time.Second)
@@ -130,6 +146,25 @@ func (u *UI) renderTaskInfo() {
 		u.taskInfoData.Provider,
 		u.taskInfoData.Engine,
 	)
+
+	// Ensure the text fits within the available width
+	availableWidth := u.taskInfo.Inner.Dx()
+	if runewidth.StringWidth(text) > availableWidth {
+		// Truncate the text to fit within the available width
+		// Leave room for "..." at the end
+		truncated := ""
+		currentWidth := 0
+		for _, char := range text {
+			charWidth := runewidth.RuneWidth(char)
+			if currentWidth+charWidth+3 > availableWidth { // +3 for "..."
+				break
+			}
+			truncated += string(char)
+			currentWidth += charWidth
+		}
+		text = truncated + "..."
+	}
+
 	u.taskInfo.Text = text
 	ui.Render(u.taskInfo)
 }
@@ -137,6 +172,14 @@ func (u *UI) renderTaskInfo() {
 // renderHistory renders the history widget
 func (u *UI) renderHistory() {
 	u.historyList.Rows = []string{}
+
+	// Get the width, ensuring it's at least a reasonable minimum
+	width := u.historyList.Inner.Dx()
+	if width < 20 {
+		// Use a reasonable default if width is too small
+		width = 80
+	}
+
 	for _, entry := range u.historyData {
 		timestamp := entry.Timestamp.Format("15:04:05")
 		prefix := ""
@@ -149,7 +192,7 @@ func (u *UI) renderHistory() {
 			prefix = "[System]"
 		}
 		text := fmt.Sprintf("[%s] %s %s", timestamp, prefix, entry.Content)
-		wrappedText := wrapText(text, u.historyList.Inner.Dx())
+		wrappedText := wrapText(text, width)
 		u.historyList.Rows = append(u.historyList.Rows, wrappedText...)
 	}
 	ui.Render(u.historyList)
@@ -157,8 +200,38 @@ func (u *UI) renderHistory() {
 
 // renderREPL renders the REPL widget
 func (u *UI) renderREPL() {
+	// Default prompt is "goline> ", but can be changed with UpdateREPLPrompt
 	prompt := "goline> "
-	u.replParagraph.Text = prompt + u.replInput
+	if u.replParagraph.Title != "Command Input" {
+		// If the title has been changed, use it as the prompt base
+		prompt = u.replParagraph.Title
+	}
+
+	// If we have an input handler with a cursor position, display the cursor
+	if u.inputHandler != nil {
+		// Get the cursor position from the input handler
+		cursorPos := u.inputHandler.cursorPos
+
+		// Insert cursor character at the cursor position
+		if cursorPos <= len(u.replInput) {
+			// Split the input at the cursor position
+			before := u.replInput[:cursorPos]
+			after := ""
+			if cursorPos < len(u.replInput) {
+				after = u.replInput[cursorPos:]
+			}
+
+			// Use a visible cursor character (block)
+			u.replParagraph.Text = prompt + before + "█" + after
+		} else {
+			// Fallback if cursor position is invalid
+			u.replParagraph.Text = prompt + u.replInput + "█"
+		}
+	} else {
+		// No input handler, just show the input without cursor
+		u.replParagraph.Text = prompt + u.replInput
+	}
+
 	ui.Render(u.replParagraph)
 }
 
@@ -222,16 +295,25 @@ func (u *UI) SetInputHandler(handler *InputHandler) {
 // wrapText wraps text to fit within a given width
 func wrapText(text string, width int) []string {
 	var lines []string
-	words := runewidth.StringWidth(text)
-	if words <= width {
+
+	// Ensure width is reasonable
+	if width <= 0 {
+		width = 80 // Default to 80 columns if width is invalid
+	}
+
+	totalWidth := runewidth.StringWidth(text)
+	if totalWidth <= width {
 		return []string{text}
 	}
 
-	// Simple wrapping algorithm
+	// Improved wrapping algorithm
 	current := ""
 	currentWidth := 0
+
 	for _, char := range text {
 		charWidth := runewidth.RuneWidth(char)
+
+		// If adding this character would exceed the width, start a new line
 		if currentWidth+charWidth > width {
 			lines = append(lines, current)
 			current = string(char)
@@ -240,10 +322,20 @@ func wrapText(text string, width int) []string {
 			current += string(char)
 			currentWidth += charWidth
 		}
+
+		// If we hit a newline character, respect it
+		if char == '\n' {
+			lines = append(lines, current)
+			current = ""
+			currentWidth = 0
+		}
 	}
+
+	// Don't forget the last line
 	if current != "" {
 		lines = append(lines, current)
 	}
+
 	return lines
 }
 
