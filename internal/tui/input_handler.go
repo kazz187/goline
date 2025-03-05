@@ -19,6 +19,11 @@ type InputHandler struct {
 	commandActive bool
 }
 
+// GetCursorPosition returns the current cursor position
+func (h *InputHandler) GetCursorPosition() int {
+	return h.cursorPos
+}
+
 // NewInputHandler creates a new input handler
 func NewInputHandler(ui *UI, integration *REPLIntegration) *InputHandler {
 	return &InputHandler{
@@ -87,7 +92,6 @@ func (h *InputHandler) HandleKeyEvent(e ui.Event) bool {
 		if h.commandActive {
 			// If we're in a multi-line input mode, submit the current input
 			h.commandActive = false
-			h.integration.AddSystemMessage("Multi-line input completed")
 
 			// Get the command from the prompt
 			cmdName := strings.TrimSuffix(h.ui.replParagraph.Title, "> ")
@@ -97,9 +101,21 @@ func (h *InputHandler) HandleKeyEvent(e ui.Event) bool {
 				if h.currentInput == "" {
 					h.integration.AddSystemMessage("Error: question is required")
 				} else {
-					h.integration.AddSystemMessage("Sending question to AI agent...")
-					h.integration.AddSystemMessage("TODO: Implement ask logic")
+					// For the ask command, just add the user's question directly as a user message
+					// without any system messages
 					h.integration.AddUserInput(fmt.Sprintf("ask\n%s", h.currentInput))
+				}
+			} else {
+				// For other commands, display the multi-line input completed message and the input content
+				h.integration.AddSystemMessage("Multi-line input completed")
+
+				// Display the input content as system messages
+				if h.currentInput != "" {
+					h.integration.AddSystemMessage("Input content:")
+					lines := strings.Split(h.currentInput, "\n")
+					for _, line := range lines {
+						h.integration.AddSystemMessage(line)
+					}
 				}
 			}
 
@@ -144,7 +160,14 @@ func (h *InputHandler) handleEnter() bool {
 
 	// If we're in multi-line input mode, add a newline instead of submitting
 	if h.commandActive {
-		h.handleCharInput("\n")
+		// Insert a newline at the cursor position
+		before := h.currentInput[:h.cursorPos]
+		after := h.currentInput[h.cursorPos:]
+		h.currentInput = before + "\n" + after
+		h.cursorPos = h.cursorPos + 1 // Move cursor after the newline
+
+		// Update the UI
+		h.ui.UpdateREPLInput(h.currentInput)
 		return false
 	}
 
@@ -200,6 +223,44 @@ func (h *InputHandler) processCommand(command string) {
 		h.integration.AddSystemMessage("  checkpoint save - Save the current task state as a checkpoint")
 		h.integration.AddSystemMessage("  checkpoint restore [checkpointID] - Restore a previously saved checkpoint")
 		h.integration.AddSystemMessage("  diff [checkpointID] - Show the difference between the current state and a checkpoint")
+		h.integration.AddSystemMessage("  debug - Show debug information about the current input")
+	case "debug":
+		// Display debug information about the current input
+		h.integration.AddSystemMessage("Debug information:")
+		h.integration.AddSystemMessage(fmt.Sprintf("Input length: %d", len(h.currentInput)))
+		h.integration.AddSystemMessage(fmt.Sprintf("Cursor position: %d", h.cursorPos))
+
+		// Display the input with line numbers and cursor position
+		lines := strings.Split(h.currentInput, "\n")
+		for i, line := range lines {
+			h.integration.AddSystemMessage(fmt.Sprintf("Line %d (%d chars): %s", i+1, len(line), line))
+		}
+
+		// Find which line the cursor is on
+		pos := 0
+		cursorLine := 0
+		cursorCol := 0
+		for i, line := range lines {
+			lineLength := len(line)
+			if pos+lineLength >= h.cursorPos {
+				cursorLine = i
+				cursorCol = h.cursorPos - pos
+				break
+			}
+			pos += lineLength + 1 // +1 for the newline character
+		}
+		h.integration.AddSystemMessage(fmt.Sprintf("Cursor at line %d, column %d", cursorLine+1, cursorCol+1))
+
+		// Display the input as a hex dump for debugging
+		h.integration.AddSystemMessage("Input as hex:")
+		hexDump := ""
+		for i, c := range h.currentInput {
+			if i == h.cursorPos {
+				hexDump += "[CURSOR]"
+			}
+			hexDump += fmt.Sprintf("%02x ", c)
+		}
+		h.integration.AddSystemMessage(hexDump)
 	case "ask":
 		question := strings.TrimSpace(strings.TrimPrefix(command, "ask"))
 		if question == "" {
@@ -290,6 +351,62 @@ func (h *InputHandler) handleEnd() {
 
 // handleUp handles the Up arrow key
 func (h *InputHandler) handleUp() {
+	// In multi-line input mode, move cursor up one line
+	if h.commandActive && strings.Contains(h.currentInput, "\n") {
+		// Get all lines
+		allLines := strings.Split(h.currentInput, "\n")
+
+		// Calculate line start positions
+		lineStartPositions := make([]int, len(allLines))
+		pos := 0
+		for i := range allLines {
+			lineStartPositions[i] = pos
+			pos += len(allLines[i]) + 1 // +1 for the newline character
+		}
+
+		// Find which line the cursor is on
+		currentLineIndex := -1
+		for i := 0; i < len(allLines); i++ {
+			if i < len(allLines)-1 {
+				// Not the last line
+				if lineStartPositions[i] <= h.cursorPos && h.cursorPos < lineStartPositions[i+1] {
+					currentLineIndex = i
+					break
+				}
+			} else {
+				// Last line
+				if lineStartPositions[i] <= h.cursorPos {
+					currentLineIndex = i
+					break
+				}
+			}
+		}
+
+		// If we couldn't determine the line or we're already at the first line, do nothing
+		if currentLineIndex <= 0 {
+			return
+		}
+
+		// Calculate column position on current line
+		currentColPos := h.cursorPos - lineStartPositions[currentLineIndex]
+
+		// Try to maintain the same column position on the previous line
+		prevLineLength := len(allLines[currentLineIndex-1])
+		newColPos := currentColPos
+		if newColPos > prevLineLength {
+			newColPos = prevLineLength
+		}
+
+		// Calculate the new absolute cursor position
+		newPos := lineStartPositions[currentLineIndex-1] + newColPos
+
+		// Update cursor position
+		h.cursorPos = newPos
+
+		return
+	}
+
+	// In normal mode, navigate command history
 	if len(h.inputHistory) == 0 {
 		return
 	}
@@ -306,6 +423,62 @@ func (h *InputHandler) handleUp() {
 
 // handleDown handles the Down arrow key
 func (h *InputHandler) handleDown() {
+	// In multi-line input mode, move cursor down one line
+	if h.commandActive && strings.Contains(h.currentInput, "\n") {
+		// Get all lines
+		allLines := strings.Split(h.currentInput, "\n")
+
+		// Calculate line start positions
+		lineStartPositions := make([]int, len(allLines))
+		pos := 0
+		for i := range allLines {
+			lineStartPositions[i] = pos
+			pos += len(allLines[i]) + 1 // +1 for the newline character
+		}
+
+		// Find which line the cursor is on
+		currentLineIndex := -1
+		for i := 0; i < len(allLines); i++ {
+			if i < len(allLines)-1 {
+				// Not the last line
+				if lineStartPositions[i] <= h.cursorPos && h.cursorPos < lineStartPositions[i+1] {
+					currentLineIndex = i
+					break
+				}
+			} else {
+				// Last line
+				if lineStartPositions[i] <= h.cursorPos {
+					currentLineIndex = i
+					break
+				}
+			}
+		}
+
+		// If we couldn't determine the line or we're already at the last line, do nothing
+		if currentLineIndex < 0 || currentLineIndex >= len(allLines)-1 {
+			return
+		}
+
+		// Calculate column position on current line
+		currentColPos := h.cursorPos - lineStartPositions[currentLineIndex]
+
+		// Try to maintain the same column position on the next line
+		nextLineLength := len(allLines[currentLineIndex+1])
+		newColPos := currentColPos
+		if newColPos > nextLineLength {
+			newColPos = nextLineLength
+		}
+
+		// Calculate the new absolute cursor position
+		newPos := lineStartPositions[currentLineIndex+1] + newColPos
+
+		// Update cursor position
+		h.cursorPos = newPos
+
+		return
+	}
+
+	// In normal mode, navigate command history
 	if h.historyIndex == -1 {
 		return
 	}
@@ -351,7 +524,11 @@ func (h *InputHandler) handleCharInput(char string) {
 // startMultiLineInput starts multi-line input mode for a command
 func (h *InputHandler) startMultiLineInput(command string) {
 	h.commandActive = true
-	h.integration.AddSystemMessage(fmt.Sprintf("Enter multi-line input for '%s' command (press Ctrl+D when done):", command))
+
+	// Only show the instruction message for commands other than "ask"
+	if command != "ask" {
+		h.integration.AddSystemMessage(fmt.Sprintf("Enter multi-line input for '%s' command (press Ctrl+D when done):", command))
+	}
 
 	// Update the prompt to indicate multi-line input mode
 	h.ui.UpdateREPLPrompt(fmt.Sprintf("%s> ", command))
