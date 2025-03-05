@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/kazz187/goline/cmd/goline/subcmd"
@@ -47,6 +48,9 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
+	// Register config commands
+	subcmd.RegisterConfigCommands(app)
+
 	// Parse command line
 	cmd, err := app.Parse(os.Args[1:])
 	if err != nil {
@@ -55,24 +59,29 @@ func main() {
 	}
 
 	// Execute the appropriate command
-	switch cmd {
-	case "start":
+	switch {
+	case cmd == "start":
 		if err := subcmd.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-	case "resume":
+	case cmd == "resume":
 		if err := subcmd.Resume(*taskID); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-	case "tasks":
+	case cmd == "tasks":
 		if err := subcmd.ListTasks(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-	case "attach":
+	case cmd == "attach":
 		if err := subcmd.Attach(*terminalID); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	case strings.HasPrefix(cmd, "config"):
+		if err := subcmd.HandleConfigCommand(cmd); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
