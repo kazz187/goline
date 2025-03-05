@@ -1,0 +1,156 @@
+# Goline Architecture & Development Guide
+
+## プロジェクト概要
+
+Golineとは、VSCodeの拡張であるClineを参考に開発された、CUIベースのAIエージェントです。
+GolineはIDEとの連携を抽象化し、特定のIDE依存なしにユーザーにAIエージェントを提供します。
+一つの実装として、CUIベースのUIを提供します。
+
+### 利用技術
+
+- Go 1.24.0
+- Buf v2 (buf cli: 1.50.0)
+- Protocol Buffers
+
+## Goline の基本設計
+
+Golineは、Clineの実装を参考にしつつ、以下の方針で開発を進めます。
+
+今回優先的に実装するproviderは、anthropicとdeepseekに絞りますが、Ad-Hocな実装はなるべく避けます。
+
+Golineは実行可能バイナリ `goline` として提供され、各種サブコマンドが実行できます。サブコマンドの種類には2種類あり、REPLとOneshotがあります。
+
+### REPL
+
+REPLのコマンドは直ぐに結果を返さず、ユーザーと対話してタスクを進めていきます。
+画面構成としては横方向に3分割されており、上部にはタスクの情報(IDなど)が表示されます。中央には実行履歴が表示され、下部にはユーザーの入力を受け付けます。それぞれ「タスク情報画面」「コマンド履歴画面」「コマンド入力画面」と称します。
+
+#### REPL開始方法
+
+- goline start
+  - Goline タスクを開始する
+  - タスクが開始されると、タスク画面のTUIが表示される
+- goline resume [taskID]
+  - 一時停止しているタスクを再開する
+  - タスクが再開されると、タスク画面のTUIが表示される
+
+#### REPL内コマンド
+
+- help
+  - REPL内コマンドのヘルプを表示する
+- exit
+  - REPLを終了する
+- ask [question]
+  - AIエージェントに質問をする
+  - question が1行だと困るので複数行に対応する必要がある(外部エディタを利用してもよい)
+- apply
+  - AIエージェントの提案を適用する
+- cancel
+  - AIエージェントの提案をキャンセルする
+- checkpoint save
+  - 現在のタスク状態をcheckpointを保存する
+  - checkpointID が表示される
+- checkpoint restore [checkpointID]
+  - checkpointID に対応するタスク状態を復元する
+- diff [checkpointID]
+  - 指定したチェックポイントと現在のワークスペースの状態との差分を表示する
+
+### Oneshot
+
+- goline help
+  - コマンドのヘルプを表示する
+- goline tasks
+  - タスクの一覧を表示する (タスクID, タスクプロンプトの冒頭, タスクの状態)
+- attach [terminalID]
+  - 1タスクに対して1つのターミナルが `start` 時にPTYとしてバックグラウンドで起動される
+  - terminalIDがタスク情報画面に表示されているので、指定した terminalID のPTYにアタッチする(シェルの画面になる)
+
+## タスクデータの管理方法
+
+タスクデータにはprotobufを利用します。
+
+[taskID].pb というファイル名で保存され、タスクの状態を保存します。
+
+タスクデータの保存場所はユーザーが自由に設定することができます。デフォルトはgitレポジトリのルートに`.goline/tasks/` として配置します。
+
+## 設定ファイルの管理方法
+
+`~/.goline/config.yaml` にglobal設定ファイルを保存します。
+global設定ファイルには以下の情報を保存します。
+
+- Golineが利用するプロバイダーの設定
+  - プロバイダーのAPIキー
+  - プロバイダーのエンドポイント
+- その他設定
+
+レポジトリルートの`./.goline/config.yaml` にはリポジトリごとの設定ファイルを保存します。
+
+- このリポジトリのタスクで利用するprovider名とエンジン名
+- その他設定
+
+## Goline のディレクトリ構成
+
+### `cmd`
+
+コマンドのエントリポイント実装があります。
+
+`cmd/goline/main.go` にはエントリーポイントがあり、 `cmd/goline/subcmd/` には各サブコマンドの実装があります。
+
+コマンド、サブコマンドの実装には `github.com/alecthomas/kingpin/v2` を利用します。
+
+### `pkg`
+
+ロガーやコンバーターなど汎用的に使えるパッケージ群はここに置き、再利用可能な形で実装します。
+
+### `internal`
+
+他のプロジェクトから参照されたくない再利用不可なコードはここ以下に置きます。
+
+### `proto`
+
+タスクデータの管理に利用するprotobufの定義ファイルがあります。
+
+Buf v2 で管理されています。最新の Buf を使っているので追従してください。
+
+設定ファイルには `buf.yaml`, `buf.gen.yaml`, `buf.lock` があります。 
+
+`proto/gen/go` にはGo言語向けのコードが生成されます。
+
+モジュール名は `buf.build/kazz187/goline` にします。
+
+`proto/goline/v1/tasks.proto` にはタスクデータの定義があります。
+
+### `cline`
+
+Cline 本家の実装は `./cline/` (symbolic link) にあり、TypeScriptで記述されており、本家の実装として参照することは可能ですが修正を加えてはいけませんし、直接利用してもいけません。コードはすべて`cline`外に記述してください。
+
+`./cline/src/core` にはコア実装が記述されており、 `./cline/src/core/Cline.ts` には主な機能の実装がなされています。
+
+`./cline/api/` には各生成AI外車が提供しているAPIの実装が記述されており、 `./cline/api/providers/` には各ベンダーごとの実装があります。
+
+## Go TIPS
+
+### go tool
+
+Go 1.24からは `go mod` の中で `go tool` を管理できるようになりました。
+これまでのように `go install github.com/example` といった方法でインストールする必要はなくなりました。
+`go get -tool github.com/example@ver` でインストールすることができます。
+また、利用するときは `go tool example` で実行できます。(example は期待する実行ファイル名)
+
+### ロギング
+
+- Go 標準パッケージの `slog` を利用する
+
+### PTYの実装
+
+`github.com/creack/pty` を利用して実装する。
+
+### REPLの実装
+
+`github.com/abiosoft/ishell/v2` を利用して実装する。
+
+日本語などの文字幅調整に `github.com/mattn/go-runewidth` が使える。 
+
+### TUIの実装
+
+`github.com/gizak/termui` を利用して実装する。
