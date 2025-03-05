@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/abiosoft/ishell/v2"
+	"github.com/kazz187/goline/internal/core/checkpoint"
 )
 
 // REPLCommands defines the available commands in the REPL
@@ -163,36 +165,158 @@ func registerCancelCommand(shell *ishell.Shell) {
 
 // registerCheckpointCommands registers the checkpoint commands
 func registerCheckpointCommands(shell *ishell.Shell) {
-	checkpoint := &ishell.Cmd{
+	checkpointCmd := &ishell.Cmd{
 		Name: "checkpoint",
 		Help: "Manage task checkpoints",
 	}
 
-	checkpoint.AddCmd(&ishell.Cmd{
+	checkpointCmd.AddCmd(&ishell.Cmd{
 		Name: "save",
 		Help: "Save the current task state as a checkpoint",
 		Func: func(c *ishell.Context) {
+			// Get task context
+			taskID := getCurrentTaskID()
+			if taskID == "" {
+				c.Println("Error: No active task")
+				return
+			}
+			workingDir, err := os.Getwd()
+			if err != nil {
+				c.Printf("Error: Failed to get working directory: %v\n", err)
+				return
+			}
+
+			// Get checkpoint name
+			var name string
+			if len(c.Args) > 0 {
+				name = strings.Join(c.Args, " ")
+			} else {
+				c.Print("Enter checkpoint name: ")
+				name = c.ReadLine()
+			}
+			if name == "" {
+				name = fmt.Sprintf("Checkpoint %s", time.Now().Format(time.RFC3339))
+			}
+
+			// Create checkpoint service
+			service := checkpoint.NewService()
+
+			// Save checkpoint
 			c.Println("Saving checkpoint...")
-			c.Println("TODO: Implement checkpoint save logic")
-			c.Println("Checkpoint ID: checkpoint-123")
+			event, err := service.SaveCheckpoint(taskID, workingDir, name, "")
+			if err != nil {
+				c.Printf("Error: Failed to save checkpoint: %v\n", err)
+				return
+			}
+
+			// Display result
+			c.Printf("Checkpoint saved: %s\n", event.CheckpointId[:8])
+
+			// TODO: Add checkpoint event to task history
 		},
 	})
 
-	checkpoint.AddCmd(&ishell.Cmd{
+	checkpointCmd.AddCmd(&ishell.Cmd{
 		Name: "restore",
 		Help: "Restore a previously saved checkpoint",
 		Func: func(c *ishell.Context) {
-			if len(c.Args) == 0 {
+			// Get task context
+			taskID := getCurrentTaskID()
+			if taskID == "" {
+				c.Println("Error: No active task")
+				return
+			}
+			workingDir, err := os.Getwd()
+			if err != nil {
+				c.Printf("Error: Failed to get working directory: %v\n", err)
+				return
+			}
+
+			// Create checkpoint service
+			service := checkpoint.NewService()
+
+			// Get checkpoints
+			checkpoints, err := service.GetCheckpoints(taskID, workingDir)
+			if err != nil {
+				c.Printf("Error: Failed to get checkpoints: %v\n", err)
+				return
+			}
+			if len(checkpoints) == 0 {
+				c.Println("No checkpoints available")
+				return
+			}
+
+			// Get checkpoint ID
+			var checkpointID string
+			if len(c.Args) > 0 {
+				checkpointID = c.Args[0]
+			} else {
+				// Display checkpoints
+				c.Println(service.FormatCheckpointList(checkpoints))
+
+				// Prompt for checkpoint ID
+				c.Print("Enter checkpoint ID: ")
+				checkpointID = c.ReadLine()
+			}
+			if checkpointID == "" {
 				c.Println("Error: checkpoint ID is required")
 				return
 			}
-			checkpointID := c.Args[0]
+
+			// Confirm restore
+			c.Printf("Are you sure you want to restore checkpoint %s? This will overwrite your current workspace. (y/n): ", checkpointID)
+			confirm := c.ReadLine()
+			if !strings.EqualFold(confirm, "y") && !strings.EqualFold(confirm, "yes") {
+				c.Println("Restore cancelled")
+				return
+			}
+
+			// Restore checkpoint
 			c.Printf("Restoring checkpoint %s...\n", checkpointID)
-			c.Println("TODO: Implement checkpoint restore logic")
+			_, err = service.RestoreCheckpoint(taskID, workingDir, checkpointID)
+			if err != nil {
+				c.Printf("Error: Failed to restore checkpoint: %v\n", err)
+				return
+			}
+
+			c.Println("Checkpoint restored successfully")
+
+			// TODO: Add checkpoint event to task history
 		},
 	})
 
-	shell.AddCmd(checkpoint)
+	checkpointCmd.AddCmd(&ishell.Cmd{
+		Name: "list",
+		Help: "List all checkpoints for the current task",
+		Func: func(c *ishell.Context) {
+			// Get task context
+			taskID := getCurrentTaskID()
+			if taskID == "" {
+				c.Println("Error: No active task")
+				return
+			}
+			workingDir, err := os.Getwd()
+			if err != nil {
+				c.Printf("Error: Failed to get working directory: %v\n", err)
+				return
+			}
+
+			// Create checkpoint service
+			service := checkpoint.NewService()
+
+			// Get checkpoints
+			checkpoints, err := service.GetCheckpoints(taskID, workingDir)
+			if err != nil {
+				c.Printf("Error: Failed to get checkpoints: %v\n", err)
+				return
+			}
+
+			// Display checkpoints
+			c.Println(service.FormatCheckpointList(checkpoints))
+		},
+	})
+
+	shell.AddCmd(checkpointCmd)
 }
 
 // registerDiffCommand registers the diff command
@@ -201,15 +325,68 @@ func registerDiffCommand(shell *ishell.Shell) {
 		Name: "diff",
 		Help: "Show the difference between the current state and a checkpoint",
 		Func: func(c *ishell.Context) {
-			if len(c.Args) == 0 {
+			// Get task context
+			taskID := getCurrentTaskID()
+			if taskID == "" {
+				c.Println("Error: No active task")
+				return
+			}
+			workingDir, err := os.Getwd()
+			if err != nil {
+				c.Printf("Error: Failed to get working directory: %v\n", err)
+				return
+			}
+
+			// Create checkpoint service
+			service := checkpoint.NewService()
+
+			// Get checkpoints
+			checkpoints, err := service.GetCheckpoints(taskID, workingDir)
+			if err != nil {
+				c.Printf("Error: Failed to get checkpoints: %v\n", err)
+				return
+			}
+			if len(checkpoints) == 0 {
+				c.Println("No checkpoints available")
+				return
+			}
+
+			// Get checkpoint ID
+			var fromCheckpointID string
+			if len(c.Args) > 0 {
+				fromCheckpointID = c.Args[0]
+			} else {
+				// Display checkpoints
+				c.Println(service.FormatCheckpointList(checkpoints))
+
+				// Prompt for checkpoint ID
+				c.Print("Enter checkpoint ID to compare from: ")
+				fromCheckpointID = c.ReadLine()
+			}
+			if fromCheckpointID == "" {
 				c.Println("Error: checkpoint ID is required")
 				return
 			}
-			checkpointID := c.Args[0]
-			c.Printf("Showing diff for checkpoint %s...\n", checkpointID)
-			c.Println("TODO: Implement diff logic")
+
+			// Get diff
+			c.Printf("Showing diff for checkpoint %s...\n", fromCheckpointID)
+			diffs, err := service.GetDiff(taskID, workingDir, fromCheckpointID, "")
+			if err != nil {
+				c.Printf("Error: Failed to get diff: %v\n", err)
+				return
+			}
+
+			// Display diff
+			c.Println(service.FormatDiff(diffs))
 		},
 	})
+}
+
+// getCurrentTaskID returns the ID of the current task
+// TODO: Implement this function to get the actual task ID
+func getCurrentTaskID() string {
+	// For now, return a dummy task ID
+	return "task-123"
 }
 
 // startREPL starts the REPL shell
