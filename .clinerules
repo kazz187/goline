@@ -1,4 +1,4 @@
-# Goline Architecture & Development Guide
+git# Goline Architecture & Development Guide
 
 ## プロジェクト概要
 
@@ -44,9 +44,11 @@ REPLのコマンドは直ぐに結果を返さず、ユーザーと対話して�
   - AIエージェントに質問をする
   - question が1行だと困るので複数行に対応する必要がある(外部エディタを利用してもよい)
 - apply
-  - AIエージェントの提案を適用する
+  - AIエージェントの提案を適用する (二択を求めるTUIでもよい)
+- reject
+  - AIエージェントの提案を拒否する (二択を求めるTUIでもよい)
 - cancel
-  - AIエージェントの提案をキャンセルする
+  - タスクをキャンセルする
 - checkpoint save
   - 現在のタスク状態をcheckpointを保存する
   - checkpointID が表示される
