@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"github.com/abiosoft/ishell/v2"
+	"io"
 	"log/slog"
 	"strings"
 
@@ -17,6 +19,8 @@ type InputHandler struct {
 	historyIndex  int
 	inputHistory  []string
 	commandActive bool
+	shell         *ishell.Shell
+	shellInput    io.Writer
 }
 
 // GetCursorPosition returns the current cursor position
@@ -25,7 +29,7 @@ func (h *InputHandler) GetCursorPosition() int {
 }
 
 // NewInputHandler creates a new input handler
-func NewInputHandler(ui *UI, integration *REPLIntegration) *InputHandler {
+func NewInputHandler(ui *UI, integration *REPLIntegration, shell *ishell.Shell, shellInput io.Writer) *InputHandler {
 	return &InputHandler{
 		ui:           ui,
 		integration:  integration,
@@ -33,6 +37,8 @@ func NewInputHandler(ui *UI, integration *REPLIntegration) *InputHandler {
 		cursorPos:    0,
 		historyIndex: -1,
 		inputHistory: []string{},
+		shell:        shell,
+		shellInput:   shellInput,
 	}
 }
 
@@ -93,8 +99,9 @@ func (h *InputHandler) HandleKeyEvent(e ui.Event) bool {
 			// If we're in a multi-line input mode, submit the current input
 			h.commandActive = false
 
+			rootCmd := h.shell.RootCmd()
 			// Get the command from the prompt
-			cmdName := strings.TrimSuffix(h.ui.replParagraph.Title, "> ")
+			cmdName := strings.TrimSuffix(rootCmd.Name, "> ")
 
 			// Process the multi-line input based on the command
 			if cmdName == "ask" {
@@ -125,7 +132,7 @@ func (h *InputHandler) HandleKeyEvent(e ui.Event) bool {
 			h.ui.UpdateREPLInput(h.currentInput)
 
 			// Reset the prompt
-			h.ui.UpdateREPLPrompt("Command Input")
+			h.ui.UpdateREPLPrompt("goline> ")
 
 			return false
 		} else if h.currentInput == "" {
@@ -193,9 +200,8 @@ func (h *InputHandler) handleEnter() bool {
 	h.ui.UpdateREPLInput(h.currentInput)
 
 	// Reset the prompt if it was changed
-	if h.ui.replParagraph.Title != "Command Input" {
-		h.ui.UpdateREPLPrompt("Command Input")
-	}
+	rootCmd := h.shell.RootCmd()
+	h.ui.UpdateREPLPrompt(rootCmd.Name + "> ")
 
 	return false
 }

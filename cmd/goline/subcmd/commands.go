@@ -11,24 +11,18 @@ import (
 func Start() error {
 	fmt.Println("Starting a new Goline task...")
 
-	// Initialize the REPL shell
-	shell := initREPL()
-
 	// Start the TUI with the REPL
-	return tui.StartREPLWithTUI(shell)
+	return tui.StartREPLWithTUI()
 }
 
 // Resume resumes a paused task
 func Resume(taskID string) error {
 	fmt.Printf("Resuming task %s...\n", taskID)
 
-	// Initialize the REPL shell
-	shell := initREPL()
-
 	// TODO: Load task data from storage
 
 	// Start the TUI with the REPL
-	return tui.StartREPLWithTUI(shell)
+	return tui.StartREPLWithTUI()
 }
 
 // ListTasks lists all tasks

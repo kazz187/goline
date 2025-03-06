@@ -1,12 +1,15 @@
-package subcmd
+package tui
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/abiosoft/ishell/v2"
+	"github.com/abiosoft/readline"
 	"github.com/kazz187/goline/internal/core/checkpoint"
 )
 
@@ -59,9 +62,14 @@ var REPLCommands = []struct {
 }
 
 // initREPL initializes the REPL shell
-func initREPL() *ishell.Shell {
-	shell := ishell.New()
-	shell.SetPrompt("goline> ")
+func initREPL(stdin, stdout, stderr *bytes.Buffer) *ishell.Shell {
+	shell := ishell.NewWithConfig(&readline.Config{
+		Prompt:      "goline> ",
+		Stdin:       io.NopCloser(stdin),
+		StdinWriter: stdin,
+		Stdout:      stdout,
+		Stderr:      stderr,
+	})
 
 	// Register commands
 	registerHelpCommand(shell)
@@ -387,18 +395,4 @@ func registerDiffCommand(shell *ishell.Shell) {
 func getCurrentTaskID() string {
 	// For now, return a dummy task ID
 	return "task-123"
-}
-
-// startREPL starts the REPL shell
-func startREPL() error {
-	shell := initREPL()
-
-	// Display welcome message
-	fmt.Println("Welcome to Goline!")
-	fmt.Println("Type 'help' to see available commands.")
-
-	// Start the shell
-	shell.Run()
-
-	return nil
 }

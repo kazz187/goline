@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,22 +14,29 @@ import (
 
 // REPLIntegration represents the integration between the TUI and the REPL
 type REPLIntegration struct {
-	ui    *UI
-	shell *ishell.Shell
-	mutex sync.Mutex
+	ui     *UI
+	shell  *ishell.Shell
+	mu     sync.Mutex
+	input  *bytes.Buffer
+	output *bytes.Buffer
 }
 
 // NewREPLIntegration creates a new REPL integration
-func NewREPLIntegration(shell *ishell.Shell) (*REPLIntegration, error) {
-	ui, err := NewUI(shell)
+func NewREPLIntegration() (*REPLIntegration, error) {
+	input := bytes.NewBufferString("")
+	output := bytes.NewBufferString("")
+	repl := initREPL(input, output, output)
+	ui, err := NewUI(repl, input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create UI: %w", err)
 	}
 
 	return &REPLIntegration{
-		ui:    ui,
-		shell: shell,
-		mutex: sync.Mutex{},
+		ui:     ui,
+		shell:  repl,
+		mu:     sync.Mutex{},
+		input:  input,
+		output: output,
 	}, nil
 }
 
@@ -38,7 +46,7 @@ func (r *REPLIntegration) Start() error {
 	// We'll use a different approach to capture input/output
 
 	// Create and set the input handler
-	inputHandler := NewInputHandler(r.ui, r)
+	inputHandler := NewInputHandler(r.ui, r, r.shell, r.input)
 	r.ui.SetInputHandler(inputHandler)
 
 	// Add system history entry
@@ -76,7 +84,7 @@ func (r *REPLIntegration) setupCommandProcessing() {
 	// we'll use a different approach to capture command execution.
 
 	// We'll register a custom process function for each command we know about
-	// from the REPLCommands list in subcmd/repl.go
+	// from the REPLCommands list in subcmd/replUI.go
 
 	// For now, we'll just add a message to the history
 	r.AddSystemMessage("Command processing set up")
@@ -90,8 +98,8 @@ func (r *REPLIntegration) Close() {
 
 // AddUserInput adds user input to the history
 func (r *REPLIntegration) AddUserInput(input string) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	r.ui.AddHistoryEntry(HistoryEntry{
 		Timestamp: time.Now(),
@@ -102,8 +110,8 @@ func (r *REPLIntegration) AddUserInput(input string) {
 
 // AddAgentOutput adds agent output to the history
 func (r *REPLIntegration) AddAgentOutput(output string) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	r.ui.AddHistoryEntry(HistoryEntry{
 		Timestamp: time.Now(),
@@ -114,8 +122,8 @@ func (r *REPLIntegration) AddAgentOutput(output string) {
 
 // AddSystemMessage adds a system message to the history
 func (r *REPLIntegration) AddSystemMessage(message string) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	r.ui.AddHistoryEntry(HistoryEntry{
 		Timestamp: time.Now(),
@@ -126,8 +134,8 @@ func (r *REPLIntegration) AddSystemMessage(message string) {
 
 // UpdateREPLInput updates the REPL input
 func (r *REPLIntegration) UpdateREPLInput(input string) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	r.ui.UpdateREPLInput(input)
 }
@@ -167,8 +175,8 @@ func (w *REPLWriter) Write(p []byte) (n int, err error) {
 }
 
 // StartREPLWithTUI starts the REPL with the TUI
-func StartREPLWithTUI(shell *ishell.Shell) error {
-	integration, err := NewREPLIntegration(shell)
+func StartREPLWithTUI() error {
+	integration, err := NewREPLIntegration()
 	if err != nil {
 		return fmt.Errorf("failed to create REPL integration: %w", err)
 	}
